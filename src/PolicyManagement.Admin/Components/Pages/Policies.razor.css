@@ -1,0 +1,39 @@
+.tenant-picker {
+    min-width: 240px;
+}
+
+.description {
+    max-width: 32rem;
+}
+
+.edit-panel {
+    max-width: 900px;
+}
+
+.badge[class*="severity-"] {
+    border: 1px solid transparent;
+}
+
+.severity-low {
+    color: #14532d;
+    background: #dcfce7;
+    border-color: #bbf7d0 !important;
+}
+
+.severity-medium {
+    color: #854d0e;
+    background: #fef9c3;
+    border-color: #fef08a !important;
+}
+
+.severity-high {
+    color: #9a3412;
+    background: #ffedd5;
+    border-color: #fed7aa !important;
+}
+
+.severity-critical {
+    color: #991b1b;
+    background: #fee2e2;
+    border-color: #fecaca !important;
+}

@@ -1,0 +1,266 @@
+@page "/"
+@page "/policies"
+@inject AdminPolicyService PolicyService
+@inject TenantContext TenantContext
+@inject IJSRuntime JS
+
+<PageTitle>Policies</PageTitle>
+
+<div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+    <div>
+        <p class="text-uppercase text-primary fw-semibold small mb-1">Security policy store</p>
+        <h1 class="mb-1">Policies</h1>
+        <p class="text-secondary mb-0">Every query and write is scoped by the selected tenant.</p>
+    </div>
+    <div class="tenant-picker">
+        <label class="form-label fw-semibold" for="tenant">Current tenant</label>
+        <select id="tenant" class="form-select" value="@_selectedTenantId" @onchange="TenantChangedAsync">
+            @foreach (var tenant in _tenants)
+            {
+                <option value="@tenant.Id">@tenant.Name</option>
+            }
+        </select>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")" role="alert">
+        @_statusMessage
+    </div>
+}
+
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+        <div>
+            <strong>@CurrentTenantName</strong>
+            <span class="text-secondary ms-2">@_policies.Count policies</span>
+        </div>
+        <button class="btn btn-primary" @onclick="StartCreate">New policy</button>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Severity</th>
+                    <th>Status</th>
+                    <th>Updated (UTC)</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (_isLoading)
+                {
+                    <tr><td colspan="5" class="text-center py-5">Loading policies…</td></tr>
+                }
+                else if (_policies.Count == 0)
+                {
+                    <tr><td colspan="5" class="text-center text-secondary py-5">No policies for this tenant.</td></tr>
+                }
+                else
+                {
+                    @foreach (var policy in _policies)
+                    {
+                        <tr>
+                            <td>
+                                <div class="fw-semibold">@policy.Name</div>
+                                <div class="small text-secondary text-truncate description">@policy.Description</div>
+                            </td>
+                            <td><span class="badge severity-@policy.Severity.ToString().ToLowerInvariant()">@policy.Severity</span></td>
+                            <td>
+                                <span class="badge @(policy.IsEnabled ? "text-bg-success" : "text-bg-secondary")">
+                                    @(policy.IsEnabled ? "Enabled" : "Disabled")
+                                </span>
+                            </td>
+                            <td>@policy.UpdatedAtUtc.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td class="text-end text-nowrap">
+                                <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => StartEdit(policy)">Edit</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(policy)">Delete</button>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@if (_isEditing)
+{
+    <div class="card shadow-sm border-0 mt-4 edit-panel">
+        <div class="card-body p-4">
+            <h2 class="h4 mb-3">@(_editModel.Id == Guid.Empty ? "Create policy" : "Edit policy")</h2>
+            <EditForm Model="_editModel" OnValidSubmit="SaveAsync" FormName="policy-edit">
+                <DataAnnotationsValidator />
+                <ValidationSummary class="text-danger mb-3" />
+                @if (!string.IsNullOrWhiteSpace(_formError))
+                {
+                    <div class="alert alert-danger">@_formError</div>
+                }
+                <div class="row g-3">
+                    <div class="col-md-8">
+                        <label class="form-label" for="name">Name</label>
+                        <InputText id="name" class="form-control" @bind-Value="_editModel.Name" />
+                        <ValidationMessage For="() => _editModel.Name" class="text-danger small" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="severity">Severity</label>
+                        <InputSelect id="severity" class="form-select" @bind-Value="_editModel.Severity">
+                            @foreach (var severity in Enum.GetValues<PolicySeverity>())
+                            {
+                                <option value="@severity">@severity</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="description">Description</label>
+                        <InputTextArea id="description" class="form-control" rows="4" @bind-Value="_editModel.Description" />
+                        <ValidationMessage For="() => _editModel.Description" class="text-danger small" />
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check">
+                            <InputCheckbox id="enabled" class="form-check-input" @bind-Value="_editModel.IsEnabled" />
+                            <label class="form-check-label" for="enabled">Enabled</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-4 d-flex gap-2">
+                    <button class="btn btn-primary" type="submit" disabled="@_isSaving">
+                        @(_isSaving ? "Saving…" : "Save policy")
+                    </button>
+                    <button class="btn btn-outline-secondary" type="button" @onclick="CancelEdit" disabled="@_isSaving">Cancel</button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<TenantOption> _tenants = [];
+    private List<PolicyDto> _policies = [];
+    private PolicyEditModel _editModel = new();
+    private Guid _selectedTenantId;
+    private bool _isLoading;
+    private bool _isEditing;
+    private bool _isSaving;
+    private bool _statusIsError;
+    private string? _statusMessage;
+    private string? _formError;
+
+    private string CurrentTenantName =>
+        _tenants.FirstOrDefault(x => x.Id == _selectedTenantId)?.Name ?? "Select a tenant";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tenants = await PolicyService.GetTenantsAsync();
+        if (_tenants.Count > 0)
+        {
+            _selectedTenantId = TenantContext.TenantId ?? _tenants[0].Id;
+            TenantContext.SetTenant(_selectedTenantId);
+            await LoadPoliciesAsync();
+        }
+    }
+
+    private async Task TenantChangedAsync(ChangeEventArgs args)
+    {
+        if (!Guid.TryParse(args.Value?.ToString(), out var tenantId))
+        {
+            return;
+        }
+
+        _selectedTenantId = tenantId;
+        TenantContext.SetTenant(tenantId);
+        _isEditing = false;
+        _statusMessage = null;
+        await LoadPoliciesAsync();
+    }
+
+    private async Task LoadPoliciesAsync()
+    {
+        _isLoading = true;
+        try
+        {
+            _policies = (await PolicyService.GetPoliciesAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Could not load policies: {ex.Message}", true);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void StartCreate()
+    {
+        _editModel = new PolicyEditModel();
+        _formError = null;
+        _isEditing = true;
+    }
+
+    private void StartEdit(PolicyDto policy)
+    {
+        _editModel = new PolicyEditModel
+        {
+            Id = policy.Id,
+            Name = policy.Name,
+            Description = policy.Description,
+            IsEnabled = policy.IsEnabled,
+            Severity = policy.Severity
+        };
+        _formError = null;
+        _isEditing = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        _isSaving = true;
+        _formError = null;
+        try
+        {
+            var result = _editModel.Id == Guid.Empty
+                ? await PolicyService.CreateAsync(_editModel)
+                : await PolicyService.UpdateAsync(_editModel);
+            if (!result.Succeeded)
+            {
+                _formError = result.Error;
+                return;
+            }
+
+            _isEditing = false;
+            SetStatus("Policy saved. Connected desktop clients will receive the event.", false);
+            await LoadPoliciesAsync();
+        }
+        catch (Exception ex)
+        {
+            _formError = $"The policy could not be saved: {ex.Message}";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task DeleteAsync(PolicyDto policy)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Delete '{policy.Name}'?");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var result = await PolicyService.DeleteAsync(policy.Id);
+        SetStatus(result.Succeeded ? "Policy deleted." : result.Error!, !result.Succeeded);
+        await LoadPoliciesAsync();
+    }
+
+    private void CancelEdit() => _isEditing = false;
+
+    private void SetStatus(string message, bool isError)
+    {
+        _statusMessage = message;
+        _statusIsError = isError;
+    }
+}
