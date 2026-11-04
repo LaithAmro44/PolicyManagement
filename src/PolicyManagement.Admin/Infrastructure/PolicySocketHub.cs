@@ -8,12 +8,12 @@ namespace PolicyManagement.Admin.Infrastructure;
 
 public sealed class PolicySocketHub
 {
-    private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<Guid, WebSocket>> _connections = new();
+    private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<Guid, ClientConnection>> _connections = new();
 
     public Guid Add(Guid tenantId, WebSocket socket)
     {
         var connectionId = Guid.NewGuid();
-        _connections.GetOrAdd(tenantId, _ => new())[connectionId] = socket;
+        _connections.GetOrAdd(tenantId, _ => new())[connectionId] = new ClientConnection(socket);
         return connectionId;
     }
 
@@ -32,24 +32,34 @@ public sealed class PolicySocketHub
             return;
         }
 
-        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message));
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         var sends = tenantConnections.Select(async pair =>
         {
             try
             {
-                if (pair.Value.State == WebSocketState.Open)
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(2));
+                await pair.Value.SendLock.WaitAsync(timeout.Token);
+                try
                 {
-                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    timeout.CancelAfter(TimeSpan.FromSeconds(2));
-                    await pair.Value.SendAsync(bytes, WebSocketMessageType.Text, true, timeout.Token);
+                    if (pair.Value.Socket.State == WebSocketState.Open)
+                        await pair.Value.Socket.SendAsync(bytes, WebSocketMessageType.Text, true, timeout.Token);
                 }
+                finally { pair.Value.SendLock.Release(); }
             }
             catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or ObjectDisposedException)
             {
                 Remove(message.TenantId, pair.Key);
+                pair.Value.Socket.Abort();
             }
         });
 
         await Task.WhenAll(sends);
+    }
+
+    private sealed class ClientConnection(WebSocket socket)
+    {
+        public WebSocket Socket { get; } = socket;
+        public SemaphoreSlim SendLock { get; } = new(1, 1);
     }
 }

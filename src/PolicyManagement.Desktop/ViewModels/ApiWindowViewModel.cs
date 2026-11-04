@@ -18,6 +18,7 @@ public sealed class ApiWindowViewModel : ObservableObject, IDisposable
     private string _statusText = "Ready.";
     private Brush _statusBrush = Brushes.SlateGray;
     private string _detailsText = "Select a policy, then load its details.";
+    private int _tenantVersion;
 
     public ApiWindowViewModel()
     {
@@ -54,6 +55,7 @@ public sealed class ApiWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _tenantId, value))
             {
+                _tenantVersion++;
                 Policies.Clear();
                 SelectedPolicy = null;
                 DetailsText = "Tenant changed. Refresh the list.";
@@ -102,6 +104,7 @@ public sealed class ApiWindowViewModel : ObservableObject, IDisposable
 
     private async Task RefreshAsync()
     {
+        var tenantVersion = _tenantVersion;
         SetStatus("Loading policies…", false);
         try
         {
@@ -109,6 +112,7 @@ public sealed class ApiWindowViewModel : ObservableObject, IDisposable
                 HttpMethod.Get,
                 $"api/policies?enabledOnly={EnabledOnly.ToString().ToLowerInvariant()}");
             using var response = await _httpClient.SendAsync(request);
+            if (tenantVersion != _tenantVersion) return;
             if (!response.IsSuccessStatusCode)
             {
                 SetStatus(await ReadErrorAsync(response), true);
@@ -116,6 +120,7 @@ public sealed class ApiWindowViewModel : ObservableObject, IDisposable
             }
 
             var policies = await response.Content.ReadFromJsonAsync<List<PolicyDto>>() ?? [];
+            if (tenantVersion != _tenantVersion) return;
             Policies.Clear();
             foreach (var policy in policies)
             {
@@ -126,12 +131,14 @@ public sealed class ApiWindowViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
+            if (tenantVersion != _tenantVersion) return;
             SetStatus($"API unavailable: {ex.Message}", true);
         }
     }
 
     private async Task LoadDetailsAsync()
     {
+        var tenantVersion = _tenantVersion;
         if (SelectedPolicy is null)
         {
             return;
@@ -142,6 +149,7 @@ public sealed class ApiWindowViewModel : ObservableObject, IDisposable
         {
             using var request = CreateRequest(HttpMethod.Get, $"api/policies/{SelectedPolicy.Id}");
             using var response = await _httpClient.SendAsync(request);
+            if (tenantVersion != _tenantVersion) return;
             if (!response.IsSuccessStatusCode)
             {
                 SetStatus(await ReadErrorAsync(response), true);
@@ -149,6 +157,7 @@ public sealed class ApiWindowViewModel : ObservableObject, IDisposable
             }
 
             var policy = await response.Content.ReadFromJsonAsync<PolicyDto>();
+            if (tenantVersion != _tenantVersion) return;
             DetailsText = policy is null
                 ? "The API returned an empty response."
                 : $"{policy.Name}\n\n{policy.Description ?? "No description"}\n\n" +
@@ -158,6 +167,7 @@ public sealed class ApiWindowViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
+            if (tenantVersion != _tenantVersion) return;
             SetStatus($"Could not load details: {ex.Message}", true);
         }
     }
@@ -184,5 +194,3 @@ public sealed class ApiWindowViewModel : ObservableObject, IDisposable
 
     public void Dispose() => _httpClient.Dispose();
 }
-
-public sealed record TenantOption(Guid Id, string Name);

@@ -13,8 +13,8 @@
         <StackPanel Grid.Row="0" Margin="0,0,0,18">
             <TextBlock FontSize="28" FontWeight="SemiBold" Text="Live policy events" />
             <TextBlock Foreground="#667085" Margin="0,4,0,0">
-                <Run Text="Tenant: " /><Run FontWeight="SemiBold" Text="{Binding TenantName}" />
-                <Run Text="  •  " /><Run Text="{Binding TenantId}" />
+                <Run Text="Tenant: " /><Run FontWeight="SemiBold" Text="{Binding TenantName, Mode=OneWay}" />
+                <Run Text="  •  " /><Run Text="{Binding TenantId, Mode=OneWay}" />
             </TextBlock>
             <TextBlock Foreground="#667085" Margin="0,3,0,0" Text="{Binding WebSocketUrl}" />
         </StackPanel>

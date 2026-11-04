@@ -14,6 +14,7 @@ public sealed class EventsWindowViewModel : ObservableObject, IAsyncDisposable
     private ClientWebSocket? _socket;
     private CancellationTokenSource? _lifetime;
     private Task? _receiveTask;
+    private bool _isConnecting;
     private string _connectionState = "Disconnected";
     private Brush _stateBrush = Brushes.SlateGray;
 
@@ -23,7 +24,7 @@ public sealed class EventsWindowViewModel : ObservableObject, IAsyncDisposable
         TenantId = tenantId;
         TenantName = tenantName;
         ConnectCommand = new AsyncCommand(ConnectAsync);
-        DisconnectCommand = new AsyncCommand(DisconnectAsync);
+        DisconnectCommand = new AsyncCommand(DisconnectAsync, () => !_isConnecting);
         ClearCommand = new RelayCommand(Events.Clear);
     }
 
@@ -50,6 +51,8 @@ public sealed class EventsWindowViewModel : ObservableObject, IAsyncDisposable
     private async Task ConnectAsync()
     {
         await DisconnectAsync();
+        _isConnecting = true;
+        DisconnectCommand.RaiseCanExecuteChanged();
         SetState("Connecting…", Brushes.DarkOrange);
 
         try
@@ -58,7 +61,9 @@ public sealed class EventsWindowViewModel : ObservableObject, IAsyncDisposable
             _socket = new ClientWebSocket();
             var separator = WebSocketUrl.Contains('?') ? '&' : '?';
             var endpoint = new Uri($"{WebSocketUrl}{separator}tenantId={TenantId}");
-            await _socket.ConnectAsync(endpoint, _lifetime.Token);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            await _socket.ConnectAsync(endpoint, timeout.Token);
             SetState("Connected", Brushes.ForestGreen);
             _receiveTask = ReceiveLoopAsync(_socket, _lifetime.Token);
         }
@@ -66,6 +71,11 @@ public sealed class EventsWindowViewModel : ObservableObject, IAsyncDisposable
         {
             SetState($"Connection failed: {ex.Message}", Brushes.Firebrick);
             await DisposeSocketAsync();
+        }
+        finally
+        {
+            _isConnecting = false;
+            DisconnectCommand.RaiseCanExecuteChanged();
         }
     }
 
@@ -88,6 +98,7 @@ public sealed class EventsWindowViewModel : ObservableObject, IAsyncDisposable
                     }
 
                     message.Write(buffer, 0, result.Count);
+                    if (message.Length > 65536) throw new InvalidDataException("Event is too large.");
                 } while (!result.EndOfMessage);
 
                 var json = Encoding.UTF8.GetString(message.ToArray());
@@ -95,11 +106,13 @@ public sealed class EventsWindowViewModel : ObservableObject, IAsyncDisposable
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 if (policyEvent is not null)
                 {
-                    await Application.Current.Dispatcher.InvokeAsync(() =>
+                    await Application.Current.Dispatcher.InvokeAsync(() => {
                         Events.Insert(0, new EventFeedItem(
                             policyEvent.Type,
                             policyEvent.Policy?.Name ?? policyEvent.PolicyId?.ToString() ?? "Connection established",
-                            policyEvent.OccurredAtUtc)));
+                            policyEvent.OccurredAtUtc));
+                        if (Events.Count > 500) Events.RemoveAt(Events.Count - 1);
+                    });
                 }
             }
         }
@@ -110,13 +123,6 @@ public sealed class EventsWindowViewModel : ObservableObject, IAsyncDisposable
         catch (Exception ex)
         {
             await SetStateOnUiAsync($"Disconnected: {ex.Message}", Brushes.Firebrick);
-        }
-        finally
-        {
-            if (!cancellationToken.IsCancellationRequested)
-            {
-                await SetStateOnUiAsync("Disconnected", Brushes.SlateGray);
-            }
         }
     }
 
@@ -133,12 +139,13 @@ public sealed class EventsWindowViewModel : ObservableObject, IAsyncDisposable
         {
             try
             {
+                using var closeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
                 await _socket.CloseOutputAsync(
                     WebSocketCloseStatus.NormalClosure,
                     "User disconnected",
-                    CancellationToken.None);
+                    closeTimeout.Token);
             }
-            catch (WebSocketException)
+            catch (Exception ex) when (ex is WebSocketException or OperationCanceledException)
             {
                 // The peer may already have gone away.
             }
@@ -181,5 +188,3 @@ public sealed class EventsWindowViewModel : ObservableObject, IAsyncDisposable
 
     public async ValueTask DisposeAsync() => await DisconnectAsync();
 }
-
-public sealed record EventFeedItem(string Type, string Summary, DateTime OccurredAtUtc);

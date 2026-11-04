@@ -7,8 +7,7 @@ public sealed class PolicyDbContext(
     DbContextOptions<PolicyDbContext> options,
     ITenantContext tenantContext) : DbContext(options)
 {
-    private readonly ITenantContext _tenantContext = tenantContext;
-    private Guid? CurrentTenantId => _tenantContext.TenantId;
+    private Guid CurrentTenantId => tenantContext.TenantId ?? Guid.Empty;
 
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Policy> Policies => Set<Policy>();
@@ -28,6 +27,7 @@ public sealed class PolicyDbContext(
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Description).HasMaxLength(2000);
+            entity.Property(x => x.TenantId).IsConcurrencyToken();
             entity.Property(x => x.Severity).HasConversion<string>().HasMaxLength(20);
             entity.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
             entity.HasOne(x => x.Tenant)
@@ -35,7 +35,7 @@ public sealed class PolicyDbContext(
                 .HasForeignKey(x => x.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasQueryFilter(x =>
-                CurrentTenantId.HasValue && x.TenantId == CurrentTenantId.Value);
+                x.TenantId == CurrentTenantId);
         });
 
         var created = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -72,12 +72,17 @@ public sealed class PolicyDbContext(
         {
             if (entry.State == EntityState.Added)
             {
-                var tenantId = _tenantContext.TenantId
+                var tenantId = tenantContext.TenantId
                     ?? throw new InvalidOperationException("A current tenant is required for tenant-owned writes.");
                 entry.Entity.TenantId = tenantId;
             }
-            else if (entry.State == EntityState.Modified)
+            else if (entry.State is EntityState.Modified or EntityState.Deleted)
             {
+                if (CurrentTenantId == Guid.Empty ||
+                    entry.OriginalValues.GetValue<Guid>(nameof(ITenantOwned.TenantId)) != CurrentTenantId)
+                {
+                    throw new InvalidOperationException("Cannot change a policy belonging to another tenant.");
+                }
                 entry.Entity.TenantId = entry.OriginalValues.GetValue<Guid>(nameof(ITenantOwned.TenantId));
                 entry.Property(nameof(ITenantOwned.TenantId)).IsModified = false;
             }

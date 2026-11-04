@@ -4,6 +4,24 @@
              xmlns:local="clr-namespace:PolicyManagement.Desktop"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         
+        <Style TargetType="Window">
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Background" Value="#F4F7FB"/>
+            <Setter Property="Foreground" Value="#142A40"/>
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="#E9F1FA"/>
+            <Setter Property="Foreground" Value="#174D80"/>
+            <Setter Property="BorderBrush" Value="#C5D7E8"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="MinHeight" Value="34"/>
+        </Style>
+        <Style TargetType="DataGrid">
+            <Setter Property="RowHeight" Value="38"/>
+            <Setter Property="AlternatingRowBackground" Value="#F4F7FB"/>
+            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="#E2E8F0"/>
+        </Style>
     </Application.Resources>
 </Application>

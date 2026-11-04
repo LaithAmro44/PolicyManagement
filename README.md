@@ -10,11 +10,12 @@ I intentionally kept the solution small. The Blazor UI, two API endpoints, and W
 - `PolicyManagement.Contracts` — API DTO and WebSocket message contracts shared with WPF.
 - `PolicyManagement.Admin` — Blazor CRUD UI, REST API, Swagger, and WebSocket endpoint.
 - `PolicyManagement.Desktop` — WPF API window and live-events window.
-- `PolicyManagement.Tests` — three focused tenant-isolation tests.
+- `PolicyManagement.Tests` — 12 focused tests for tenant isolation, policy writes, and WebSocket broadcasts.
 
 ## Prerequisites
 
-- .NET SDK 10
+- Windows (required for WPF and LocalDB)
+- .NET SDK 10.0.401 or a later .NET 10 feature band, as selected by `global.json`
 - SQL Server LocalDB, or another SQL Server instance
 
 The default connection string is:
@@ -31,7 +32,9 @@ From the repository root:
 
 ```powershell
 dotnet restore
+dotnet tool restore
 dotnet ef database update --project src/PolicyManagement.Data --startup-project src/PolicyManagement.Data
+dotnet build PolicyManagement.sln -c Release
 ```
 
 The migration seeds two tenants and two policies for each tenant:
@@ -100,6 +103,7 @@ WebSocket messages use this shape:
 
 1. In WPF select Bank A, refresh the API list, and open/connect a Bank A live-events window.
 2. Switch the main WPF window to Bank B, refresh again, and open/connect a second live-events window.
+   Minimize the first events window if it covers the tenant selector; its connection stays open.
 3. The two API lists contain different seeded policies.
 4. In Blazor select Bank A and change a policy. Only the Bank A event window receives it.
 5. Copy a Bank A policy id and call `GET /api/policies/{id}` with the Bank B header. The response is `404`, not the Bank A row.
@@ -110,6 +114,8 @@ WebSocket messages use this shape:
 ### How tenant isolation works
 
 `TenantContext` is scoped. `PolicyDbContext` reads it in an EF Core global query filter, so normal policy queries are tenant-scoped without adding tenant conditions in controllers or pages. `SaveChanges` always replaces the `TenantId` on new tenant-owned rows with the current server tenant and prevents `TenantId` from being changed later.
+
+Missing tenant context returns no policies. Updates and deletes verify the original tenant; `TenantId` is also an EF concurrency token, so SQL writes include it in their `WHERE` clause. This stops a detached entity with a foreign policy id and a forged tenant from changing that row. This token protects tenant ownership; it is not a row version for detecting every concurrent edit.
 
 Blazor stores the selected tenant in the circuit scope. API middleware resolves it from `X-Tenant-Id`. The WebSocket handler resolves it from the connection query string. A wrong-tenant policy id is hidden by the same global filter and returns `404`.
 
@@ -127,11 +133,15 @@ DTOs keep the public contract separate from EF tracking and navigation propertie
 
 `PolicySocketHub` keeps an in-memory set of sockets grouped by tenant. After a successful Blazor write, it sends the event only to sockets in that tenant group. Sends run independently and a disconnected socket is removed without failing the other clients.
 
+Each socket has a send lock because WebSocket does not support simultaneous sends. A two-second timeout covers waiting and sending, so a slow client cannot hold up a write indefinitely.
+
 This is intentionally an in-process solution. It has no replay after a client disconnects and assumes one web-host instance.
 
 ### How WPF stays responsive
 
 The API view model uses `HttpClient` with `async`/`await`. The events view model uses `ClientWebSocket` and an asynchronous receive loop. Only the small observable-collection update is dispatched back to the WPF UI thread.
+
+Switching tenants clears the API view and ignores responses from the previous tenant. Each event window keeps the tenant selected when it was opened. The feed keeps the latest 500 events.
 
 ### What would change for 10,000 WebSocket clients
 
@@ -147,11 +157,22 @@ I would add authentication and resolve the tenant from validated user claims ins
 dotnet test tests/PolicyManagement.Tests
 ```
 
-The tests check that the global filter hides another tenant's row, a supplied `TenantId` is overwritten on insert, and an existing row cannot be moved to another tenant.
+The 12 tests cover missing tenant context, hidden foreign rows, insert stamping, immutable ownership, detached updates/deletes, switching tenants before saving, CRUD and duplicate names, invalid input, tenant-scoped broadcasts, concurrent sends, and failed sockets.
+
+Data/service unit tests use EF InMemory and do not require SQL Server. They do not replace a SQL integration check. During review, a separate fresh LocalDB database was migrated and used to verify CRUD, the unique-name rule, the enabled filter, wrong-tenant `404`, the detached-write guard, and real `ClientWebSocket` create/update/delete events with two tenants. That review database was removed afterward.
+
+## Code walkthrough
+
+Read `Policy.cs`, then `TenantContext.cs`, then `PolicyDbContext.cs` in `src/PolicyManagement.Data`. Continue with `Services/AdminPolicyService.cs`, `Controllers/PoliciesController.cs`, and `Infrastructure/PolicySocketHub.cs` in `src/PolicyManagement.Admin`.
+
+The write path starts in `Policies.razor`, calls `AdminPolicyService`, saves through `PolicyDbContext`, then broadcasts the saved change. WPF's `ApiWindowViewModel` reads HTTP responses; `EventsWindowViewModel` receives events. There is no repository layer or message broker.
+
+The second migration, `GuardTenantWrites`, has no schema statements: it records concurrency-token metadata in the EF model snapshot. Both migrations should remain in the submission.
 
 ## Deliberate limits
 
 - No authentication, Docker, or deployment scripts because they were not required.
 - WebSocket events are in memory and are not replayed.
+- The optional initial policy list / connected message (W2) is omitted. WPF displays the WebSocket connection state locally and receives subsequent policy changes.
 - Reconnect is a button rather than an automatic retry policy.
 - The WPF client uses a small hand-written MVVM implementation to avoid extra framework dependencies.

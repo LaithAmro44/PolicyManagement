@@ -7,6 +7,48 @@ namespace PolicyManagement.Tests;
 public sealed class TenantIsolationTests
 {
     [Fact]
+    public async Task Missing_tenant_returns_no_policies()
+    {
+        var options = CreateOptions();
+        await CreateDatabaseAsync(options);
+        await using var context = new PolicyDbContext(options, new TenantContext());
+        Assert.Empty(await context.Policies.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Detached_write_cannot_modify_another_tenants_row(bool delete)
+    {
+        var options = CreateOptions();
+        await CreateDatabaseAsync(options);
+        await using var bankB = CreateContext(options, SeedTenantIds.BankB);
+        // Even a caller forging its own tenant on a known foreign id must fail.
+        var policy = new Policy
+        {
+            Id = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001"),
+            TenantId = SeedTenantIds.BankB,
+            Name = "Forged update"
+        };
+        if (delete) bankB.Remove(policy);
+        else bankB.Update(policy);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => bankB.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task Changing_tenant_after_loading_does_not_allow_saving_old_rows()
+    {
+        var options = CreateOptions();
+        await CreateDatabaseAsync(options);
+        var tenant = new TenantContext();
+        tenant.SetTenant(SeedTenantIds.BankA);
+        await using var context = new PolicyDbContext(options, tenant);
+        var policy = await context.Policies.FirstAsync();
+        tenant.SetTenant(SeedTenantIds.BankB);
+        policy.Name = "Wrong tenant";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync());
+    }
+    [Fact]
     public async Task Global_filter_hides_another_tenants_policy_even_by_id()
     {
         var options = CreateOptions();

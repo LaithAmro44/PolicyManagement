@@ -1,5 +1,7 @@
 html, body {
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #f4f7fb;
+    color: #142a40;
 }
 
 a, .btn-link {
@@ -17,8 +19,17 @@ a, .btn-link {
 }
 
 .content {
-    padding-top: 1.1rem;
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+    max-width: 1440px;
+    margin: auto;
 }
+
+.card { border-radius: 14px; overflow: hidden; }
+.table > :not(caption) > * > * { padding: 1rem; }
+.table thead th { background: #edf3f9; color: #526579; font-size: .8rem; }
+.btn, .form-control, .form-select { border-radius: 8px; }
+h1 { font-weight: 700; letter-spacing: -.04em; }
 
 h1:focus {
     outline: none;

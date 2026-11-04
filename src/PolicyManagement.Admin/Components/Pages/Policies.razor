@@ -10,11 +10,11 @@
     <div>
         <p class="text-uppercase text-primary fw-semibold small mb-1">Security policy store</p>
         <h1 class="mb-1">Policies</h1>
-        <p class="text-secondary mb-0">Every query and write is scoped by the selected tenant.</p>
+        <p class="text-secondary mb-0">Manage security policies for your organization.</p>
     </div>
     <div class="tenant-picker">
         <label class="form-label fw-semibold" for="tenant">Current tenant</label>
-        <select id="tenant" class="form-select" value="@_selectedTenantId" @onchange="TenantChangedAsync">
+        <select id="tenant" class="form-select" disabled="@(_isSaving || _isLoading)" value="@_selectedTenantId" @onchange="TenantChangedAsync">
             @foreach (var tenant in _tenants)
             {
                 <option value="@tenant.Id">@tenant.Name</option>
@@ -36,7 +36,7 @@
             <strong>@CurrentTenantName</strong>
             <span class="text-secondary ms-2">@_policies.Count policies</span>
         </div>
-        <button class="btn btn-primary" @onclick="StartCreate">New policy</button>
+        <button class="btn btn-primary" disabled="@(_isSaving || _isLoading || _selectedTenantId == Guid.Empty)" @onclick="StartCreate">New policy</button>
     </div>
     <div class="table-responsive">
         <table class="table table-hover align-middle mb-0">
@@ -75,8 +75,8 @@
                             </td>
                             <td>@policy.UpdatedAtUtc.ToString("yyyy-MM-dd HH:mm")</td>
                             <td class="text-end text-nowrap">
-                                <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => StartEdit(policy)">Edit</button>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(policy)">Delete</button>
+                                <button class="btn btn-sm btn-outline-primary me-2" disabled="@_isSaving" @onclick="() => StartEdit(policy)">Edit</button>
+                                <button class="btn btn-sm btn-outline-danger" disabled="@_isSaving" @onclick="() => DeleteAsync(policy)">Delete</button>
                             </td>
                         </tr>
                     }
@@ -153,12 +153,19 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _tenants = await PolicyService.GetTenantsAsync();
-        if (_tenants.Count > 0)
+        try
         {
-            _selectedTenantId = TenantContext.TenantId ?? _tenants[0].Id;
-            TenantContext.SetTenant(_selectedTenantId);
-            await LoadPoliciesAsync();
+            _tenants = await PolicyService.GetTenantsAsync();
+            if (_tenants.Count > 0)
+            {
+                _selectedTenantId = TenantContext.TenantId ?? _tenants[0].Id;
+                TenantContext.SetTenant(_selectedTenantId);
+                await LoadPoliciesAsync();
+            }
+        }
+        catch (Exception)
+        {
+            SetStatus("Could not load tenants. Check the database connection and run the migrations.", true);
         }
     }
 
@@ -179,6 +186,7 @@
     private async Task LoadPoliciesAsync()
     {
         _isLoading = true;
+        _policies.Clear();
         try
         {
             _policies = (await PolicyService.GetPoliciesAsync()).ToList();
@@ -251,9 +259,19 @@
             return;
         }
 
-        var result = await PolicyService.DeleteAsync(policy.Id);
-        SetStatus(result.Succeeded ? "Policy deleted." : result.Error!, !result.Succeeded);
-        await LoadPoliciesAsync();
+        _isSaving = true;
+        try
+        {
+            var result = await PolicyService.DeleteAsync(policy.Id);
+            SetStatus(result.Succeeded ? "Policy deleted." : result.Error!, !result.Succeeded);
+            _isEditing = false;
+            await LoadPoliciesAsync();
+        }
+        catch (Exception)
+        {
+            SetStatus("Could not delete the policy. Please try again.", true);
+        }
+        finally { _isSaving = false; }
     }
 
     private void CancelEdit() => _isEditing = false;

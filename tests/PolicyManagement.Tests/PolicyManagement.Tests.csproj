@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\PolicyManagement.Data\PolicyManagement.Data.csproj" />
+    <ProjectReference Include="..\..\src\PolicyManagement.Admin\PolicyManagement.Admin.csproj" />
   </ItemGroup>
 
 </Project>

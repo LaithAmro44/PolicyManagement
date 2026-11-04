@@ -46,6 +46,18 @@ public sealed class PolicyWebSocketHandler(
         finally
         {
             hub.Remove(tenantId, connectionId);
+            if (socket.State == WebSocketState.CloseReceived)
+            {
+                try
+                {
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Disconnected", timeout.Token);
+                }
+                catch (Exception ex) when (ex is WebSocketException or OperationCanceledException)
+                {
+                    // The peer may have already closed the transport.
+                }
+            }
         }
     }
 }

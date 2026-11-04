@@ -2,18 +2,6 @@ using PolicyManagement.Contracts;
 
 namespace PolicyManagement.Data;
 
-public interface ITenantOwned
-{
-    Guid TenantId { get; set; }
-}
-
-public sealed class Tenant
-{
-    public Guid Id { get; set; }
-    public required string Name { get; set; }
-    public ICollection<Policy> Policies { get; set; } = [];
-}
-
 public sealed class Policy : ITenantOwned
 {
     public Guid Id { get; set; }

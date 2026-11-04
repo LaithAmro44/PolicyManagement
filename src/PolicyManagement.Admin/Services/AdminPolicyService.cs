@@ -35,6 +35,7 @@ public sealed class AdminPolicyService(
     public async Task<SaveResult> CreateAsync(PolicyEditModel model, CancellationToken cancellationToken = default)
     {
         EnsureTenantSelected();
+        Validator.ValidateObject(model, new ValidationContext(model), validateAllProperties: true);
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
         var normalizedName = model.Name.Trim();
         if (await db.Policies.AnyAsync(x => x.Name == normalizedName, cancellationToken))
@@ -47,7 +48,7 @@ public sealed class AdminPolicyService(
         {
             Id = Guid.NewGuid(),
             Name = normalizedName,
-            Description = Clean(model.Description),
+            Description = TrimOptionalText(model.Description),
             IsEnabled = model.IsEnabled,
             Severity = model.Severity,
             CreatedAtUtc = now,
@@ -60,6 +61,7 @@ public sealed class AdminPolicyService(
     public async Task<SaveResult> UpdateAsync(PolicyEditModel model, CancellationToken cancellationToken = default)
     {
         EnsureTenantSelected();
+        Validator.ValidateObject(model, new ValidationContext(model), validateAllProperties: true);
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
         var policy = await db.Policies.SingleOrDefaultAsync(x => x.Id == model.Id, cancellationToken);
         if (policy is null)
@@ -76,7 +78,7 @@ public sealed class AdminPolicyService(
         }
 
         policy.Name = normalizedName;
-        policy.Description = Clean(model.Description);
+        policy.Description = TrimOptionalText(model.Description);
         policy.IsEnabled = model.IsEnabled;
         policy.Severity = model.Severity;
         policy.UpdatedAtUtc = DateTime.UtcNow;
@@ -113,7 +115,7 @@ public sealed class AdminPolicyService(
             policy.Id, policy.Name, policy.Description, policy.IsEnabled, policy.Severity,
             policy.CreatedAtUtc, policy.UpdatedAtUtc);
         var message = new PolicyEventMessage(
-            Guid.NewGuid(), type, tenantContext.TenantId!.Value, policy.Id, dto, DateTime.UtcNow);
+            Guid.NewGuid(), type, policy.TenantId, policy.Id, dto, DateTime.UtcNow);
         await socketHub.BroadcastAsync(message, cancellationToken);
         return result;
     }
@@ -142,28 +144,6 @@ public sealed class AdminPolicyService(
         }
     }
 
-    private static string? Clean(string? value) =>
+    private static string? TrimOptionalText(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-}
-
-public sealed class PolicyEditModel
-{
-    public Guid Id { get; set; }
-
-    [Required, StringLength(200)]
-    public string Name { get; set; } = string.Empty;
-
-    [StringLength(2000)]
-    public string? Description { get; set; }
-
-    public bool IsEnabled { get; set; } = true;
-    public PolicySeverity Severity { get; set; } = PolicySeverity.Medium;
-}
-
-public sealed record TenantOption(Guid Id, string Name);
-
-public sealed record SaveResult(bool Succeeded, string? Error)
-{
-    public static SaveResult Success() => new(true, null);
-    public static SaveResult Failure(string error) => new(false, error);
 }

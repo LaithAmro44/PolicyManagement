@@ -49,6 +49,7 @@ namespace PolicyManagement.Data.Migrations
                         .HasColumnType("nvarchar(20)");
 
                     b.Property<Guid>("TenantId")
+                        .IsConcurrencyToken()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("UpdatedAtUtc")

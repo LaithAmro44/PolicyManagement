@@ -7,6 +7,7 @@ namespace PolicyManagement.Desktop;
 public partial class EventsWindow : Window
 {
     private readonly EventsWindowViewModel _viewModel;
+    private bool _canClose;
 
     public EventsWindow(string webSocketUrl, Guid tenantId, string tenantName)
     {
@@ -17,7 +18,10 @@ public partial class EventsWindow : Window
 
     protected override async void OnClosing(CancelEventArgs e)
     {
+        if (_canClose) { base.OnClosing(e); return; }
+        e.Cancel = true;
         await _viewModel.DisposeAsync();
-        base.OnClosing(e);
+        _canClose = true;
+        Close();
     }
 }
